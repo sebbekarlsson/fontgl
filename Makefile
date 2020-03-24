@@ -2,7 +2,7 @@ exec = a.out
 sources = $(wildcard src/*.c)
 sources += $(wildcard GL/src/*.c)
 objects = $(sources:.c=.o)
-flags = -Wall -g -IGL/include -lglfw -ldl -lcglm -lm -lGLEW -lGL -I/usr/local/include/freetype2 -lfreetype
+flags = -Wall -g -IGL/include -lglfw -ldl -lcglm -lm -lGLEW -lGL -I/usr/local/include/freetype2 -I/usr/include/freetype2 -lfreetype
 
 
 $(exec): $(objects)
