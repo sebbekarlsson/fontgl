@@ -261,7 +261,6 @@ int main(int argc, char* argv[])
     {
         int width, height;
         mat4 p, mvp;
-        double t = glfwGetTime();
 
         glfwGetFramebufferSize(window, &width, &height);
         glViewport(0, 0, width, height);
