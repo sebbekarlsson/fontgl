@@ -36,7 +36,13 @@ typedef struct CHARACTER_STRUCT
     GLuint advance;    // Horizontal offset to advance to next glyph
 } character_T;
 
-character_T* get_character(char c)
+typedef struct CHARACTER_LIST_STRUCT
+{
+    size_t size;
+    character_T** items;
+} character_list_T;
+
+character_T* get_character(char c, const char* fontpath, int size)
 {
     // FreeType
     FT_Library ft;
@@ -46,11 +52,11 @@ character_T* get_character(char c)
 
     // Load font as face
     FT_Face face;
-    if (FT_New_Face(ft, "/usr/share/fonts/truetype/lato/Lato-Medium.ttf", 0, &face))
+    if (FT_New_Face(ft, fontpath, 0, &face))
         perror("ERROR::FREETYPE: Failed to load font");
 
     // Set size to load glyphs as
-    FT_Set_Pixel_Sizes(face, 0, 18);
+    FT_Set_Pixel_Sizes(face, 0, size);
 
     // Disable byte-alignment restriction
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1); 
@@ -93,6 +99,33 @@ character_T* get_character(char c)
     FT_Done_FreeType(ft); 
 
     return character;
+}
+
+static character_list_T get_characters(const char* text, const char* fontpath, int size)
+{
+    character_list_T list;
+    list.size = 0;
+    list.items = (void*)0;
+
+    for (int i = 0; i < strlen(text); i++)
+    {
+        character_T* character = get_character(text[i], fontpath, size);
+
+        list.size += 1;
+
+        if (list.items == (void*)0)
+        {
+            list.items = calloc(list.size, sizeof(struct CHARACTER_STRUCT*));
+        }
+        else
+        {
+            list.items = realloc(list.items, sizeof(struct CHARACTER_STRUCT*) * list.size);
+        }
+
+        list.items[list.size - 1] = character;
+    }
+
+    return list;
 }
 
 int main(int argc, char* argv[])
@@ -229,30 +262,9 @@ int main(int argc, char* argv[])
     vertex_location = glGetAttribLocation(program, "thevertex");
     mvp_location = glGetUniformLocation(program, "MVP");
 
-    glBindVertexArray(VAO); 
+    glBindVertexArray(VAO);
 
-    /**
-     * Create and bind texture
-     */
-    character_T* character = get_character('H');
-    unsigned int texture = character->texture;
-
-    float scale = 0.1f;
-    GLfloat xpos = -(character->width*scale) / 2;
-    GLfloat ypos = -(character->height*scale) / 2; 
-
-    GLfloat w = character->width * scale;
-    GLfloat h = character->height * scale;
-
-    GLfloat vertices[6][4] = {
-        { xpos,     ypos + h,   0.0, 0.0 },            
-        { xpos,     ypos,       0.0, 1.0 },
-        { xpos + w, ypos,       1.0, 1.0 },
-
-        { xpos,     ypos + h,   0.0, 0.0 },
-        { xpos + w, ypos,       1.0, 1.0 },
-        { xpos + w, ypos + h,   1.0, 0.0 }           
-    }; 
+    character_list_T character_list = get_characters("OMNUM", "/usr/share/fonts/truetype/gentium/GentiumAlt-R.ttf", 72); 
 
     /**
      * Main loop
@@ -261,33 +273,72 @@ int main(int argc, char* argv[])
     {
         int width, height;
         mat4 p, mvp;
+        double t = glfwGetTime();
 
         glfwGetFramebufferSize(window, &width, &height);
         glViewport(0, 0, width, height);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glClearColor(0.2f, 0.4f, 0.2f, 1.0f);
         
         mat4 m = GLM_MAT4_IDENTITY_INIT; 
 
         glm_translate(m, (vec3){ 0, 0, 0 });
         
-        glm_ortho_default(width / (float) height, p);
+        glm_ortho(0.0f, width, 0, height, -10.0f, 100.0f, p);
         glm_mat4_mul(p, m, mvp);
 
         glUseProgram(program);
         glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) mvp);
 
+
+        float scale = 1.0f;
+
+        float full_text_width = 0;
+        for (int i = 0; i < character_list.size; i++)
+        {
+            character_T* character = character_list.items[i];
+            full_text_width += character->bearing_left * scale;
+            full_text_width += (character->advance >> 6) * scale;
+        }
+
         /**
          * Draw texture
          */
-        glActiveTexture(GL_TEXTURE0);
-        glBindVertexArray(VAO);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glBindBuffer(GL_ARRAY_BUFFER, VBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 6 * 4, vertices, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(vertex_location);
-        glVertexAttribPointer(vertex_location, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        float x = width / 2;
+        float y = height / 2;
+        for (int i = 0; i < character_list.size; i++)
+        {
+            character_T* character = character_list.items[i];
+            unsigned int texture = character->texture;
+
+            GLfloat xpos = x + ((character->bearing_left * scale) - (full_text_width/2));
+            GLfloat ypos = y - (character->height - character->bearing_top) * scale;
+            ypos = ypos + sin((t+i) *  5.0f) * 16.0f;
+
+            GLfloat w = character->width * scale;
+            GLfloat h = character->height * scale;
+
+            GLfloat vertices[6][4] = {
+                { xpos,     ypos + h,   0.0, 0.0 },            
+                { xpos,     ypos,       0.0, 1.0 },
+                { xpos + w, ypos,       1.0, 1.0 },
+
+                { xpos,     ypos + h,   0.0, 0.0 },
+                { xpos + w, ypos,       1.0, 1.0 },
+                { xpos + w, ypos + h,   1.0, 0.0 }           
+            };
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindVertexArray(VAO);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glBindBuffer(GL_ARRAY_BUFFER, VBO);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat) * 6 * 4, vertices, GL_STATIC_DRAW);
+            glEnableVertexAttribArray(vertex_location);
+            glVertexAttribPointer(vertex_location, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+
+            x += (character->advance >> 6) * scale;
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
